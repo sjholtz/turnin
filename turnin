@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Directions:
+#
+# Instructors:
+#    1) Copy, edit, and run the 'turnin-setup' script to setup the
+#       server environment. (If you have not already done so.)
+#
+#    2) Copy or move this script into your $HOME directory (for easy
+#       TA access). (If you have not already done so.)
+#
+#    3) Set 'instructor' variable below to your username. I.e. replace
+#       'Instructor_Username' below with your username. (If you have
+#       not already done so.)
+#
+#    4) Replace 'server' and 'base_dir' variables with the same values
+#       that were used in the 'turnin-setup' script. (If you have not
+#       already done so.)
+#
+#    5) Set permissions on your $HOME directory so that your TAs can
+#       copy this script, by executing:
+#
+#       chmod 751 $HOME
+#
+#       (If you have not already done so.)
+#
+#    6) Have your TA(s) copy (cp) this script from your $HOME
+#       directory (command to do so is below).
+#
+# TAs:
+#    1) Copy this script from your instructor's account into your
+#       account, by executing:
+#
+#       cp ~Instructor_Username/turnin ~/
+#
+#    2) Set 'assistant' variable to your username. I.e. replace
+#       'TA_Username' below with your username. Get your username
+#       by executing:
+#
+#       whoami
+#
+#    3) Set the permissions on your account such that students can
+#       execute this script, by executing:
+#
+#       chmod 751 $HOME
+#
+#    4) Make sure this script is executable, by executing:
+#
+#       chmod 755 ~/turnin
+#
+#    5) Teach your students how to use this script
+
+# Configuration:
+assistant="TA_Username"
+
+instructor="Instructor_Username"
+server="server"
+base_dir="/turnin"
+
+# Set error flags:
+ERR_NO_SETFACL_INSTALLED=1
+ERR_TA_NO_ACCESS=2
+ERR_HOST_NOT_SERVER=3
+ERR_BAD_ARG=4
+ERR_CMD_FAILED=5
+
+# Usage function:
+usage() {
+    cat << EOF
+Usage: $(basename "$0") <file>
+
+    Where <file> is the name of the file you are turning in.
+
+    <file> can only be turn in from on ${server}. Please logon to
+    ${server} (if you are not). If you're unsure which host you
+    are on, execute 'hostname' to see which host you are on.
+EOF
+}
+
+# Define logging function:
+log_message() {
+    if [ "$#" -ne 2 ]; then
+        logger -s "ERROR: log_message function $# != 2."
+        exit ERR_BAD_ARG
+    fi
+
+    local message="$1"
+    local error_code="$2"
+
+    logger -s "$(basename "$0"): ${message}"
+
+    if [ "${error_code}" -ne 0 ]; then
+        exit "${error_code}"
+    fi
+}
+
+# Validate arguments:
+validate_args() {
+    # Exit if the script has been called with no or more than one
+    # arguments:
+    if [ "$#" -ne 1 ]; then
+        usage
+        log_message "ERROR: This script takes exactly one argument." $ERR_BAD_ARG
+    fi
+}
+
+# Check prerequisites:
+check_prerequisites() {
+    # Are we running on the correct server?
+    if [[ "$(hostname)" != "${server}" ]]; then
+        usage
+        log_message "ERROR: Not running on ${server}." $ERR_HOST_NOT_SERVER
+    fi
+
+    # Does 'server' have a 'base_dir' directory?
+    if [[ ! -d "${base_dir}" ]]; then
+        usage
+        log_message "ERROR: ${server} does not have a ${base_dir}." $ERR_CMD_FAILED
+    fi
+
+    # Make sure permissions on 'base_dir' are correct:
+    if ! are_perms_correct "${base_dir}" "1777"; then
+        usage
+        log_message "ERROR: ${base_dir} does not have 1777 permissions." $ERR_CMD_FAILED
+    fi
+
+    if ! command -v setfacl >/dev/null 2>&1; then
+        usage
+        log_message "ERROR: Have sys admin install setfacl utility." $ERR_NO_SETFACL_INSTALLED
+    fi
+}
+
+# Check the permissions on a file or directory:
+are_perms_correct() {
+    if [ "$#" -ne 2 ]; then
+        log_message "ERROR: are_perms_correct: Incorrect number of args." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local perms="$2"
+
+    [[ "$(stat -c %a "${dir}")" == "${perms}" ]]
+}
+
+# Check if directory exists and create if needed:
+ensure_dir() {
+    if [ "$#" -ne 2 ]; then
+        log_message "ERROR: ensure_dir: Incorrect number of args." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local mode="$2"
+
+    if [[ ! -d "${dir}" ]]; then
+        if ! mkdir -m "${mode}" -p "${dir}" 2>/dev/null; then
+            log_message "ERROR: Unable to create ${dir} directory. Please pass this error message to your instructor and TA." $ERR_CMD_FAILED
+        fi
+    elif ! are_perms_correct "${dir}" "${mode}"; then
+        if ! chmod "${mode}" "${dir}"; then
+            log_message "ERROR: ${dir} could not be set to ${mode}. Please pass this error message to your instructor and TA." $ERR_CMD_FAILED
+        fi
+    fi
+}
+
+# Test if ACL is set for user on directory:
+is_student_acl_set() {
+    if [ "$#" -ne 4 ]; then
+        log_message "ERROR: is_student_acl_set function $# != 4." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local instructor="$2"
+    local assistant="$3"
+    local mode="$4"
+
+    getfacl "${dir}" 2>/dev/null | grep -q "user:${instructor}:${mode}"
+}
+
+# Set user ACL for directory:
+set_student_acl() {
+    if [ "$#" -ne 4 ]; then
+        log_message "ERROR: set_student_acl function $# != 4." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local instructor="$2"
+    local assistant="$3"
+    local perm="$4"
+
+    setfacl -Rm u:"${instructor}":"${perm}",u:"${assistant}":"${perm}" "${dir}"
+}
+
+# Validate the “file” that was passed in:
+validate_file() {
+    if [ "$#" -ne 1 ]; then
+        log_message "ERROR: validate_file function $# != 1." $ERR_BAD_ARG
+    fi
+
+    local file="$1"
+
+    # Verify that the file name has characters:
+    if [[ "x${file}" == "x" ]]; then
+        log_message "ERROR: The filename is empty." $ERR_BAD_ARG
+    fi
+
+    # Verify we're not dealing with a directory
+    if [[ -d "${file}" ]]; then
+        log_message "ERROR: Cannot turn in directories. Please specify a file." $ERR_BAD_ARG
+    fi
+
+    # Check if file exists and is readable
+    if [[ ! -f "${file}" ]] || [[ ! -r "${file}" ]]; then
+        log_message "ERROR: File '${file}' does not exist or is not readable." $ERR_BAD_ARG
+    fi
+
+    # Check for symbolic links (potential security risk)
+    if [[ -L "${file}" ]]; then
+        log_message "ERROR: Symbolic links are not allowed. Turn in the actual file." $ERR_BAD_ARG
+    fi
+
+    # Check for absolute paths
+    if [[ "${file}" == /* ]]; then
+        log_message "ERROR: Absolute paths are not allowed. Use relative paths only." $ERR_BAD_ARG
+    fi
+
+    # Check for dangerous path components
+    if [[ "${file}" == *".."* ]]; then
+        log_message "ERROR: Path traversal attempts detected." $ERR_BAD_ARG
+    fi
+
+    # Verify file is not empty
+    if [[ ! -s "${file}" ]]; then
+        log_message "WARNING: Turning in an empty file: ${file}." 0
+    fi
+}
+
+main() {
+    validate_args "$@"
+
+    check_prerequisites
+
+    local file="$1"
+    validate_file "${file}"
+
+    # Set local values:
+    local student="${USER}"
+    local student_dir="${base_dir}/${instructor}/submissions/${assistant}/${student}"
+    local submit_file="${student_dir}/$(date +%Y-%m-%d-%H-%M-%S)_$(basename "${file}")"
+
+    local all_rx_rx_perm="755"
+    local all_wx_wx_perm="733"
+    local rwx_perm="rwx"
+
+    # Create directories, if necessary:
+    ensure_dir "${student_dir}" "${all_wx_wx_perm}"
+
+    # Copy the file:
+    printf "Submitting ${file} ... "
+
+    if cp "${file}" "${submit_file}" >/dev/null 2>&1; then
+        if [[ -f "${submit_file}" ]]; then
+            printf "Done!\n"
+        else
+            log_message "ERROR: File copy failed, ${submit_file} not found." $ERR_CMD_FAILED
+        fi
+    elif [ "$?" -eq 1 ]; then
+        log_message "WARNING: ${file} does not exist and was not turned in." 0
+    else
+        log_message "ERROR: Unknown problem occurred, the file ${file} may not be turned in." $ERR_CMD_FAILED
+    fi
+
+    # Note that an individual student is running the following on
+    # their file system hierarchy, so no race condition can exist
+    # between the call to getfacl (in is_student_acl_set) and setfacl
+    # (in set_student_acl).
+    #
+    # Recursively set the ACL on this file for instructor and TA:
+    if ! is_student_acl_set "${submit_file}" "${instructor}" "${assistant}" "${rwx_perm}"; then
+        set_student_acl "${student_dir}" "${instructor}" "${assistant}" "${rwx_perm}" || \
+            log_message "ERROR: Unable to set ${rwx_perm} ACL for ${student} in ${student_dir}." $ERR_CMD_FAILED
+    fi
+
+    echo "turnin ${file} Complete!"
+}
+
+main "$@"

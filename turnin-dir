@@ -1,0 +1,306 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Directions:
+#
+# Instructors:
+#    1) Copy, edit, and run the 'turnin-setup' script to setup the
+#       server environment. (If you have not already done so.)
+#
+#    2) Copy or move this script into your $HOME directory (for easy
+#       TA access). (If you have not already done so.)
+#
+#    3) Set 'instructor' variable below to your username. I.e. replace
+#       'Instructor_Username' below with your username. (If you have
+#       not already done so.)
+#
+#    4) Replace 'server' and 'base_dir' variables with the same values
+#       that were used in the 'turnin-setup' script. (If you have not
+#       already done so.)
+#
+#    5) Set the 'fileExtToTurnin' array to the set of file extensions
+#       that will be turned in for this course. All files with
+#       extensions other than these will be ignored (i.e. not turned
+#       in). (If you have not already done so.)
+#
+#    6) Set permissions on your $HOME directory so that your TAs can
+#       copy this script, by executing:
+#
+#       chmod 751 $HOME
+#
+#       (If you have not already done so.)
+#
+#    7) Have your TA(s) copy (cp) this script from your $HOME
+#       directory (command to do so is below).
+#
+# TAs:
+#    1) Copy this script from your instructor's account into your
+#       account, by executing:
+#
+#       cp ~Instructor_Username/turnin-dir ~/
+#
+#    2) Set 'assistant' variable to your username. I.e. replace
+#       'TA_Username' below with your username. Get your username
+#       by executing:
+#
+#       whoami
+#
+#   3) Set the permissions on your account such that students can
+#       execute this script, by executing:
+#
+#       chmod 751 $HOME
+#
+#    4) Make sure this script is executable, by executing:
+#
+#       chmod 755 ~/turnin-dir
+#
+#    5) Teach your students how to use this script
+
+# Configuration:
+assistant="TA_Username"
+
+instructor="Instructor_Username"
+server="server"
+base_dir="/turnin"
+
+# C++
+fileExtToTurnin=( ".h"
+                  ".cpp"
+                  ".txt" )
+
+# Python
+# fileExtToTurnin=( ".py" )
+
+# Turn in all file extensions
+# fileExtToTurnin=( "" )
+
+# Set error flags:
+ERR_NO_SETFACL_INSTALLED=1
+ERR_HOST_NOT_SERVER=2
+ERR_BAD_ARG=3
+ERR_CMD_FAILED=4
+
+# Usage function:
+usage() {
+    cat << EOF
+Usage: $(basename "$0") <dir>
+
+    Where <dir> is the name of the directory of files that you
+    are turning in.
+
+    Only files with extensions (ending with)
+    ${fileExtToTurnin[@]} are turned in.
+
+    <dir> can only turn in from on ${server}. Please logon to
+    ${server} (if you are not). If you're unsure which host you
+    are on, execute 'hostname' to see which host you are on.
+EOF
+}
+
+# Define logging function:
+log_message() {
+    if [ "$#" -ne 2 ]; then
+        logger -s "ERROR: log_message function $# != 2."
+        exit ERR_BAD_ARG
+    fi
+
+    local message="$1"
+    local error_code="$2"
+
+    logger -s "$(basename "$0"): ${message}"
+
+    if [ "${error_code}" -ne 0 ]; then
+        exit "${error_code}"
+    fi
+}
+
+# Validate arguments:
+validate_args() {
+    # Exit if the script has been called with no or more than one
+    # arguments:
+    if [ "$#" -ne 1 ]; then
+        usage
+        log_message "ERROR: This script takes exactly one argument." $ERR_BAD_ARG
+    fi
+}
+
+# Check prerequisites:
+check_prerequisites() {
+    # Are we running on the correct server?
+    if [[ "$(hostname)" != "${server}" ]]; then
+        usage
+        log_message "ERROR: Not running on ${server}." $ERR_HOST_NOT_SERVER
+    fi
+
+    # Does 'server' have a 'base_dir' directory?
+    if [[ ! -d "${base_dir}" ]]; then
+        usage
+        log_message "ERROR: ${server} does not have a ${base_dir}." $ERR_CMD_FAILED
+    fi
+
+    # Make sure permissions on 'base_dir' are correct:
+    if ! are_perms_correct "${base_dir}" "1777"; then
+        usage
+        log_message "ERROR: ${base_dir} does not have 1777 permissions." $ERR_CMD_FAILED
+    fi
+
+    if ! command -v setfacl >/dev/null 2>&1; then
+        usage
+        log_message "ERROR: Have sys admin install setfacl utility." $ERR_NO_SETFACL_INSTALLED
+    fi
+}
+
+# Validate the “directory” that was passed in:
+validate_dir() {
+    if [ "$#" -ne 1 ]; then
+        log_message "ERROR: validate_dir function $# != 1." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+
+    # Verify that the directory name has characters
+    if [[ -z "${dir}" ]]; then
+        log_message "ERROR: The directory name is empty." $ERR_BAD_ARG
+    fi
+
+    # Verify we're not dealing with a regular file
+    if [[ -f "${dir}" ]]; then
+        log_message "ERROR: Cannot turn in regular files. Please specify the directory containing the files you need to turn in." $ERR_BAD_ARG
+    fi
+
+    # Check if directory exists and is readable
+    if [[ ! -d "${dir}" ]] || [[ ! -r "${dir}" ]]; then
+        log_message "ERROR: Directory ${dir} does not exist or is not readable." $ERR_BAD_ARG
+    fi
+
+    # Check for symbolic links (potential security risk)
+    if [[ -L "${dir}" ]]; then
+        log_message "ERROR: Symbolic links are not allowed. Turn in the actual directory." $ERR_BAD_ARG
+    fi
+
+    # Verify directory is not empty, i.e. that contains regular files
+    # (note it could also contain symlinks and nested directories)
+    if [[ "$(find "${dir}"/* -maxdepth 0 -type f 2>/dev/null | read)" ]]; then
+        log_message "ERROR: Directory contains no files." $ERR_BAD_ARG
+    fi
+
+    # Check for absolute paths
+    if [[ "${dir}" == /* ]]; then
+        log_message "ERROR: Absolute paths are not allowed. Use relative paths only." $ERR_BAD_ARG
+    fi
+
+    # Check for dangerous path components
+    if [[ "${dir}" == *".."* ]]; then
+        log_message "ERROR: Path traversal attempts detected." $ERR_BAD_ARG
+    fi
+}
+
+# Check the permissions on a file or directory:
+are_perms_correct() {
+    if [ "$#" -ne 2 ]; then
+        log_message "ERROR: are_perms_correct: Incorrect number of args." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local perms="$2"
+
+    local actual_perms=$(stat -c "%a" "${dir}" 2>/dev/null)
+
+    [ "${perms}" == "${actual_perms}" ]
+}
+
+# Check if directory exists and create if needed:
+ensure_dir() {
+    if [ "$#" -ne 2 ]; then
+        log_message "ERROR: ensure_dir: Incorrect number of args." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local perms="$2"
+
+    if [[ ! -d "${dir}" ]]; then
+        if ! mkdir -m "${perms}" -p "${dir}" 2>/dev/null; then
+            log_message "ERROR: Unable to create ${dir} directory. Please pass this error message to your instructor and TA." $ERR_CMD_FAILED
+        fi
+    elif ! are_perms_correct "${dir}" "${perms}"; then
+        if ! chmod "${perms}" "${dir}"; then
+            log_message "ERROR: ${dir} could not be set to ${perms}. Please pass this error message to your instructor and TA." $ERR_CMD_FAILED
+        fi
+    fi
+}
+
+# Set user ACL for directory:
+set_student_acl() {
+    if [ "$#" -ne 4 ]; then
+        log_message "ERROR: set_student_acl function $# != 4." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local instructor="$2"
+    local assistant="$3"
+    local perms="$4"
+
+    setfacl -Rm u:"${instructor}":"${perms}",u:"${assistant}":"${perms}" "${dir}"
+}
+
+main() {
+    validate_args "$@"
+
+    check_prerequisites
+
+    local dir="$1"
+    # If $dir has a trailing slash, remove it
+    dir="${dir%/*}"
+
+    validate_dir "${dir}"
+
+    # Set local variables
+    local student="$(whoami)"
+    local student_dir="${base_dir}/${instructor}/submissions/${assistant}/${student}"
+    local submit_dir="${student_dir}/$(date +%Y-%m-%d-%H-%M-%S)_$(basename "${dir}")"
+
+    local all_rx_rx_perm="755"
+    local all_wx_wx_perm="733"
+    local rwx_perm="rwx"
+
+    # Create directories, if necessary:
+    ensure_dir "${submit_dir}" "${all_wx_wx_perm}"
+
+    # If no file extensions are set
+    if [[ -z "${fileExtToTurnin}" ]]; then
+        # Turn in all extensions
+        fileExtToTurnin=( "" )
+    fi
+
+    # For each file extension that needs transferred
+    for ext in "${fileExtToTurnin[@]}"; do
+        printf "Turning in ${dir}/*${ext} ... "
+
+        # Copy all file with extension $ext to $submit_dir
+        if cp "${dir}"/*"${ext}" "${submit_dir}"/ >/dev/null 2>&1; then
+            # Verify that the copy was successful
+            if find "${submit_dir}" -type f -name "*${ext}" 2>/dev/null | read; then
+                printf "Done!\n"
+            else
+                # Removed failed submission directory
+                rm -rf "${submit_dir}"
+                log_message "ERROR: Files with ${ext} extension failed to transfer. NOTHING HAS BEEN TURNED IN." $ERR_CMD_FAILED
+            fi
+        elif [ "$?" -eq 1 ]; then
+            log_message "WARNING: No files ${dir}/*${ext} exist." 0
+        else
+            # Removed failed submission directory
+            rm -rf "${submit_dir}"
+            log_message "ERROR: Unknown problem occurred. NOTHING HAS BEEN TURNED IN." $ERR_CMD_FAILED
+        fi
+    done
+
+    # Recursively set the ACL on this file for instructor and TA:
+    set_student_acl "${submit_dir}" "${instructor}" "${assistant}" "${rwx_perm}" || \
+        log_message "ERROR: Unable to set ${rwx_perm} ACL for ${student} in ${submit_dir}." $ERR_CMD_FAILED
+
+    echo "turnin-dir ${dir} Complete!"
+}
+
+main "$@"

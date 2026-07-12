@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# Directions:
+#
+# If this is the first time that you’ve used 'turnin' or 'turnin-dir',
+# you must:
+#
+# 1) Have your systems administrator create a 'base_dir' directory
+#    and set its permissions to 1777 on the 'server' where students
+#    are working. Example
+#
+#    mkdir /turnin
+#    chmod 1777 /turnin
+#
+#    The leading '1' is important for security, it sets the sticky bit
+#    for this directory.
+#
+# 2) Set the 'server' and 'base_dir' variables in the
+#    “Configuration” section below to the values used in step 1)
+#    above.
+#
+# 3) Make this script executable, by executing
+#
+#    chmod 755 turnin-setup
+#
+#    in the same directory that holds the script.
+#
+# Once done, the steps above do not need to be repeated.
+#
+# Each semester
+#
+# 1) Set the 'assistants' variable in the “Configuration” section
+#    below to the usernames of all teaching assistants for this term.
+#
+# 2) Execute this script (be sure you have chmod 755 it first ;), and
+#    the 'server' environment should be ready for you.
+#
+# 3) Setup the 'turnin' and 'turnin-dir' script with your current TAs
+#    (see those scripts for details).
+#
+
+# Configuration:
+assistants=( "TA_0_Username"
+             "TA_1_Username" )
+server="server"
+base_dir="/turnin"
+
+# Set error flags:
+ERR_NO_SETFACL_INSTALLED=1
+ERR_TA_NO_ACCESS=2
+ERR_HOST_NOT_SERVER=3
+ERR_BAD_ARG=4
+ERR_CMD_FAILED=5
+
+# Usage function:
+usage() {
+    cat << EOF
+Usage: $(basename "$0")
+
+    This script:
+    - Can only run on ${server}. Please logon to ${server} or adjust configuration.
+    - Takes no arguments.
+    - Requires the ${base_dir} directory on ${server}. Sys admin must create.
+    - Requires 1777 permissions on ${base_dir}. Sys admin must set.
+    - Requires '[gs]etfacl' utilities installed. Sys admin must install.
+EOF
+}
+
+# Define logging function:
+log_message() {
+    if [ "$#" -ne 2 ]; then
+        logger -s "ERROR: log_message function $# != 2."
+        exit ERR_BAD_ARG
+    fi
+
+    local message="$1"
+    local error_code="$2"
+
+    logger -s "$(basename $0): ${message}"
+
+    if [ "${error_code}" -ne 0 ]; then
+        exit "${error_code}"
+    fi
+}
+
+# Validate arguments:
+validate_args() {
+    # Exit if the script has been called with any arguments:
+    if [ "$#" -ne 0 ]; then
+        usage
+        log_message "ERROR: This script takes no arguments." $ERR_BAD_ARG
+    fi
+}
+
+# Check prerequisites:
+check_prerequisites() {
+    # Are we running on the correct server?
+    if [[ "$(hostname)" != "${server}" ]]; then
+        usage
+        log_message "ERROR: Not running on ${server}." $ERR_HOST_NOT_SERVER
+    fi
+
+    # Does 'server' have a 'base_dir' directory?
+    if [[ ! -d "${base_dir}" ]]; then
+        usage
+        log_message "ERROR: ${server} does not have a ${base_dir}." $ERR_CMD_FAILED
+    fi
+
+    # Make sure permissions on 'base_dir' are correct:
+    if ! are_perms_correct "${base_dir}" "1777"; then
+        usage
+        log_message "ERROR: ${base_dir} does not have 1777 permissions." $ERR_CMD_FAILED
+    fi
+
+    if ! command -v setfacl >/dev/null 2>&1; then
+        usage
+        log_message "ERROR: Have sys admin install setfacl utility." $ERR_NO_SETFACL_INSTALLED
+    fi
+
+    if [ ${#assistants[@]} -eq 0 ]; then
+        log_message "ERROR: No assistants defined in configuration." $ERR_BAD_ARG
+    fi
+}
+
+# Check the permissions on a file or directory:
+are_perms_correct() {
+    if [ "$#" -ne 2 ]; then
+        log_message "ERROR: are_perms_correct: Incorrect number of
+args." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local perms="$2"
+
+    [[ "$(stat -c %a "${dir}")" == "${perms}" ]]
+}
+
+# Check if directory exists and create if needed:
+ensure_dir() {
+    if [ "$#" -ne 2 ]; then
+        log_message "ERROR: ensure_dir: Incorrect number of args." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local mode="$2"
+
+    if [[ ! -d "${dir}" ]]; then
+        if ! mkdir -m "${mode}" -p "${dir}" 2>/dev/null; then
+            log_message "ERROR: Unable to create ${dir} directory." $ERR_CMD_FAILED
+        fi
+    elif ! are_perms_correct "${dir}" "${mode}"; then
+        if ! chmod "${mode}" "${dir}"; then
+            log_message "ERROR: ${dir} could not be set to ${mode}." $ERR_CMD_FAILED
+        fi
+    fi
+}
+
+# Test if ACL is set for user on directory:
+is_acl_set() {
+    if [ "$#" -ne 3 ]; then
+        log_message "ERROR: is_acl_set function $# != 3." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local user="$2"
+    local mode="$3"
+
+    getfacl "${dir}" 2>/dev/null | grep -q "user:${user}:${mode}"
+}
+
+# Set user ACL for directory:
+set_acl() {
+    if [ "$#" -ne 3 ]; then
+        log_message "ERROR: set_acl function $# != 3." $ERR_BAD_ARG
+    fi
+
+    local dir="$1"
+    local user="$2"
+    local perm="$3"
+
+    setfacl -m u:"${user}":"${perm}" "${dir}"
+}
+
+main() {
+    validate_args "$@"
+    check_prerequisites
+
+    # Set local values:
+    local instructor="${USER}"
+    local instructor_dir="${base_dir}/${instructor}"
+    local submissions_dir="${instructor_dir}/submissions"
+
+    local all_rx_rx_perm="755"
+    local all_wx_wx_perm="733"
+    local rwx_perm="rwx"
+
+    # Create directories, if necessary:
+    ensure_dir "${instructor_dir}" "${all_rx_rx_perm}"
+    ensure_dir "${submissions_dir}" "${all_wx_wx_perm}"
+
+    # Check TA access to 'server':
+    local no_access=0
+    for ta_username in "${assistants[@]}"; do
+        echo -n "${ta_username}: "
+        if ! id "${ta_username}" >/dev/null 2>&1; then
+            no_access=1
+            echo "NO Access!"
+        else
+            echo "OK, has access"
+        fi
+    done
+
+    # If any TA does not have access, exit:
+    if [ "${no_access}" -ne 0 ]; then
+        log_message "ERROR: Grant access for all TAs to ${server}." $ERR_TA_NO_ACCESS
+    fi
+
+    # For each TA:
+    for ta in "${assistants[@]}"; do
+        # Set this TA’s ACL on submission directory:
+        if ! is_acl_set "${submissions_dir}" "${ta}" "${rwx_perm}"; then
+            set_acl "${submissions_dir}" "${ta}" "${rwx_perm}" || \
+                log_message "ERROR: Unable to set ${rwx_perm} ACL for ${ta} in ${submissions_dir}." $ERR_CMD_FAILED
+        fi
+
+        # Create TA-specific directory and set ACL:
+        local  ta_dir="${submissions_dir}/${ta}"
+        ensure_dir "${ta_dir}" "${all_wx_wx_perm}"
+        set_acl "${ta_dir}" "${ta}" "${rwx_perm}" || \
+            log_message "ERROR: Unable to set ${rwx_perm} ACL for ${ta} in ${ta_dir}." $ERR_CMD_FAILED
+    done
+
+    # Recursively set instructor ACL for entire directory hierarchy:
+    setfacl -Rm u:"${instructor}":"${rwx_perm}" "${submissions_dir}" || \
+        log_message "ERROR: Unable to set ${rwx_perm} ACL for ${instructor} in ${submissions_dir}." $ERR_CMD_FAILED
+
+    echo "turnin-setup Complete!"
+}
+
+main "$@"
