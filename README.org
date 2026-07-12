@@ -52,8 +52,8 @@ There are at least 2 potential workflows:
      solutions for grading.
 2. Solutions consist of a directory containing multiple files, for
    example a separately compiled C++ program.
-   - Students turn in an entire directory of files using =turnin-dir
-     <dir>=.
+   - Students turn in an entire directory of files using
+     =turnin-dir <dir>=.
      - CMake build system configuration files must be written and
        stored with the C++ source.
    - Build systems are created using =cmake=.
@@ -128,8 +128,8 @@ Instructors must configure the environment for their TAs.
 
 Each TA must set up their own distribution of the turnin scripts.
 
-1. Copy the scripts from the instructor’s =$HOME=: =cp
-   ~<instructor>/turnin ~<instructor>/turnin-dir ~/=.
+1. Copy the scripts from the instructor’s =$HOME=:
+   =cp ~<instructor>/turnin ~<instructor>/turnin-dir ~/=.
 2. Edit the =assistant= variable in both scripts to match your
    username (execute =whoami= to find your username).
 3. Make the scripts executable: =chmod 755 turnin turnin-dir=.
@@ -216,7 +216,7 @@ Note that the =source= command can be shortened to =.=, which is
 
 **** Available Grading Commands
 
-1. *=li <type> <number>=*: *Li*​sts submissions for a given assignment
+1. =li <type> <number>=: *Li*​sts submissions for a given assignment
    type (=L= for Lab, =P= for Project, case insensitive) and
    number. Sorted ascending by student username and within each name
    descending by time, so the top enter for each student username is
@@ -234,7 +234,7 @@ Note that the =source= command can be shortened to =.=, which is
    ./<student2>/2026-07-09-21-18-25_lab1
    #+end_example
 
-2. *=b <path>=*: *B*​uilds the student's solution found in
+2. =b <path>=: *B*​uilds the student's solution found in
    =<path>=. The path is obtained from the output from =li=. The focus
    is speed: Type =b= followed by a space; Double click the desired
    relative path from the output from =li= (this copies); Middle click
@@ -245,10 +245,10 @@ Note that the =source= command can be shortened to =.=, which is
    b ./<student1>/2026-07-10-16-39-01_lab1
    #+end_src
 
-   *You will now be inside the student's =build= directory and can run
+   *You will now be inside the student's build directory and can run
    tests with their solution’s executable.*
 
-3. *=c=*: *C*​lean up. Removes the =build= directory and returns you to
+3. =c=: *C*​lean up. Removes the =build= directory and returns you to
    the TA root directory to grade the next student.
    #+begin_src bash
    c
