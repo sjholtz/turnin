@@ -216,7 +216,7 @@ Note that the =source= command can be shortened to =.=, which is
 
 **** Available Grading Commands
 
-1. =li <type> <number>=: *Li*​sts submissions for a given assignment
+1. =li <type> <number>=: Lists submissions for a given assignment
    type (=L= for Lab, =P= for Project, case insensitive) and
    number. Sorted ascending by student username and within each name
    descending by time, so the top enter for each student username is
@@ -234,7 +234,7 @@ Note that the =source= command can be shortened to =.=, which is
    ./<student2>/2026-07-09-21-18-25_lab1
    #+end_example
 
-2. =b <path>=: *B*​uilds the student's solution found in
+2. =b <path>=: Builds the student's solution found in
    =<path>=. The path is obtained from the output from =li=. The focus
    is speed: Type =b= followed by a space; Double click the desired
    relative path from the output from =li= (this copies); Middle click
@@ -248,7 +248,7 @@ Note that the =source= command can be shortened to =.=, which is
    *You will now be inside the student's build directory and can run
    tests with their solution’s executable.*
 
-3. =c=: *C*​lean up. Removes the =build= directory and returns you to
+3. =c=: Clean up. Removes the =build= directory and returns you to
    the TA root directory to grade the next student.
    #+begin_src bash
    c
