@@ -1,0 +1,291 @@
+# Turnin Scripts Collection
+
+**Author:** Steven J Holtz
+
+## Table of Contents
+
+- [Overview](#org158c929)
+- [Features](#org03a1d53)
+- [Prerequisites](#orgdc33a79)
+- [Architecture & Security](#org1a32262)
+  - [Access Control Lists (ACLs)](#org1c57712)
+- [Installation & Setup](#orgeef86d2)
+  - [1. System Administrator Setup](#org0eaf32b)
+  - [2. Instructor Setup](#orgb60de02)
+  - [3. Teaching Assistant (TA) Setup](#org1d74eba)
+- [Usage Guide](#orgb9ca8c6)
+  - [For Students](#org72b659f)
+  - [For Graders (Instructors & TAs)](#org9d763c8)
+
+<a id="org158c929"></a>
+
+## Overview
+
+The `turnin` collection is a suite of Bash scripts designed to
+simplify and secure the process of submitting, collecting, and grading
+programming assignments in a shared Linux server environment.
+
+It solves the common overhead associated with email submissions
+(zipping/unzipping, detaching, solutions for each individual student)
+by providing a unified, secure file system hierarchy where students
+can directly “turn in” their code. Graders and instructors can then
+seamlessly access, compile, link, and execute the students' solutions
+directly on the server.
+
+<a id="org03a1d53"></a>
+
+## Features
+
+- **Secure Submission**: Uses Access Control Lists (ACLs) and sticky
+  bits to ensure students can submit their work, while only TAs and
+  instructors can view and grade work.
+- **Timestamped Versioning**: Every submission creates a new
+  timestamped directory (`YYYY-MM-DD-HH-mm-SS_directory`), keeping a
+  complete history of student attempts and assisting with
+  late-deduction tracking.
+- **Granular Access**:
+  - Instructors have “root” access to their course submissions.
+  - Teaching Assistants (TAs) have access to their specific students’
+    submissions.
+  - Students can only submit to their assigned TA's directory.
+- **Automated Grading Helpers**: Includes utility functions to rapidly
+  list submissions in student and time order, use CMake to generate a
+  Make-based build system, compile C++ executables, and clean up build
+  artifacts.
+
+<a id="orgdc33a79"></a>
+
+## Prerequisites
+
+The instructor, TAs, and all students must have access to the shared
+Linux server where files are stored. If the TAs are not running the
+`bash` shell, they must switch to using `bash` for automated grading
+helper functions.
+
+There are at least 2 potential workflows:
+
+1. Solutions consist of single source files, for example a single
+   Python file.
+   - Students turn in single files using `turnin <file>`.
+   - TAs can move through student directories and execute their
+     solutions for grading.
+2. Solutions consist of a directory containing multiple files, for
+   example a separately compiled C++ program.
+   - Students turn in an entire directory of files using `turnin-dir
+     <dir>`.
+     - CMake build system configuration files must be written and
+       stored with the C++ source.
+   - Build systems are created using `cmake`.
+   - Executables are built using `make`.
+
+<a id="org1a32262"></a>
+
+## Architecture & Security
+
+The system relies on a root-level submission directory (default:
+`/turnin`). The file system hierarchy follows this structure:
+
+```
+/<base_dir>/<instructor>/submissions/<assistant>/<student>/YYYY-MM-DD-HH-mm-SS_<submission>/
+```
+
+<a id="org1c57712"></a>
+
+### Access Control Lists (ACLs)
+
+The scripts utilize Linux ACLs to strictly enforce permissions:
+
+- `<instructor>`: Access to everything in and above
+  `/<base_dir>/<instructor>/`.
+- `<assistant>`: Access to everything in and above
+  `/<base_dir>/<instructor>/submissions/<assistant>/`.
+- `<student>`: Has read and write access to their specific submission
+  directory but cannot list any contents.
+
+<a id="orgeef86d2"></a>
+
+## Installation & Setup
+
+There must be a shared Linux server that is large and powerful enough
+to support the instructor, TAs, and all students. This machine is best
+internet connected so students can remotely get work done and turn in
+that work.
+
+<a id="org0eaf32b"></a>
+
+### 1. System Administrator Setup
+
+The sysadmin must:
+
+1. Create accounts for the instructor and all TAs and students.
+2. Create the root directory `/<base_dir>`, and
+3. Apply a sticky bit to prevent unauthorized renaming or deletion of
+   files.
+
+Steps 2 and 3 can be accomplished with:
+```bash
+mkdir -m1777 /<base_dir>
+```
+
+<a id="orgb60de02"></a>
+
+### 2. Instructor Setup
+
+Instructors must configure the environment for their TAs.
+
+1. Download `turnin-setup`, `turnin`, and `turnin-dir` to your `$HOME`
+   directory.
+2. Make them executable: `chmod 755 turnin*`
+3. Edit the scripts:
+   - In all 3 scripts: Configure the `server` and `base_dir`.
+   - In `turnin-setup`: Set the `assistants` array (list of TA
+     usernames).
+   - In `turnin` & `turnin-dir`: Set the `instructor` variable to your
+     username.
+   - In `turnin-dir`: Configure `fileExtToTurnin` for the file
+     extensions used for the source files for the language used (e.g.,
+     `.cpp`, `.h`, `.txt` for separately-compiled C++ solutions).
+4. Run `./turnin-setup` to generate the directory structure and ACLs
+   for the TAs.
+5. Make your home directory executable so TAs can copy the scripts:
+   `chmod 711 ~`. **(Ensure private files/directories are set to
+   600/700 permissions)**.
+6. Copy the `t` grading script to
+   `/<base_dir>/<instructor>/submissions/`.
+7. Edit the lab/project counts inside the `li` function in `t`, and
+8. Set permissions for `t` to `644`.
+
+<a id="org1d74eba"></a>
+
+### 3. Teaching Assistant (TA) Setup
+
+Each TA must set up their own distribution of the turnin scripts.
+
+1. Copy the scripts from the instructor’s `$HOME`:
+   `cp ~<instructor>/turnin ~<instructor>/turnin-dir ~/`.
+2. Edit the `assistant` variable in both scripts to match your
+   username (execute `whoami` to find your username).
+3. Make the scripts executable: `chmod 755 turnin turnin-dir`.
+4. Allow students to execute the scripts from your home directory:
+   `chmod 711 ~`. **(Ensure private files/directories are secured with
+   600/700 permissions)**.
+
+<a id="orgb9ca8c6"></a>
+
+## Usage Guide
+
+<a id="org72b659f"></a>
+
+### For Students
+
+Students must be in the correct directory containing their work before
+turning it in. Depending on the assignment type, they will use either
+`turnin` (for single files) or `turnin-dir` (for a directory of
+files).
+
+#### Submitting a Single File
+
+Suppose you have a `solution.py` Python solution to turn in from your
+`~/cs101/labs/lab1/` directory. Note that the actual directory holding
+the solution does not matter; it could be just `~`.
+
+Further, suppose that the your TA’s username is `<assistant>`.
+
+Move into the directory containing the file and execute `turnin` from
+your TA’s home directory with the file’s name as an argument.
+```bash
+cd ~/cs101/labs/lab1/
+~<assistant>/turnin solution.py
+```
+
+**Output:**
+```
+Submitting solution.py ... Done!
+```
+
+#### Submitting a Directory
+
+Suppose you have a multi-file solution stored in `~/cs121/labs/lab1/`,
+and that your TA’s username is `<assistant>`.
+
+Ensure you are in the **parent** directory of the folder you need to
+turn in. Then execute `turnin-dir` with the directory name as an
+argument. Only configured extensions (e.g. `.h`, `.cpp`, `.txt` with
+C++) will be transferred.
+```bash
+cd ~/cs121/labs/
+~<assistant>/turnin-dir lab1
+```
+
+<a id="org9d763c8"></a>
+
+### For Graders (Instructors & TAs)
+
+If you’re grading single-file submissions, then you just need to move
+into student directories and execute their solutions.
+
+The bash functions described below are designed specifically for
+grading separately compiled C++ solutions that use the CMake build
+system generator and thus each solution has a `CMakeLists.txt`
+configuration file.
+
+Proper grading of C++ projects requires compiling student code and
+executing tests on their solutions. The `t` script contains a
+collection of `bash` functions that automate the compiling step, and
+then cleaning up the directory structure.
+
+#### Starting a Grading Session
+
+Source the `t` script to load the helper functions into your active
+bash session:
+```bash
+cd /turnin/<instructor>/submissions/<assistant>/
+source ../t
+```
+
+Note that the `source` command can be shortened to `.`, which is
+*much* faster to type:
+```bash
+. ../t
+```
+
+#### Available Grading Commands
+
+1. `li <type> <number>`: Lists submissions for a given assignment
+   type (`L` for Lab, `P` for Project, case insensitive) and
+   number. Sorted ascending by student username and within each name
+   descending by time, so the top enter for each student username is
+   the latest solution turned in.
+   ```bash
+   li l 1
+   ```
+
+    Note that the 2<sup>nd</sup> argument is a lowercase `L`. So, this
+    will list all student solution directories that end in `lab1`.
+
+    Typical output:
+    ```
+    ./<student1>/2026-07-10-16-39-01_lab1
+    ./<student1>/2026-07-08-18-20-01_lab1
+    ./<student2>/2026-07-09-21-18-25_lab1
+    ```
+
+2. `b <path>`: Builds the student's solution found in
+   `<path>`. The path is obtained from the output from `li`. The focus
+   is speed: Type `b` followed by a space; Double click the desired
+   relative path from the output from `li` (this copies); Middle click
+   (to paste); And, execute.
+
+   Creates a `build` directory, runs `cmake ..`, and executes `make`.
+   ```bash
+   b ./<student1>/2026-07-10-16-39-01_lab1
+   ```
+
+   **You will now be inside the student's build directory and can run
+   tests with their solution’s executable.**
+
+3. `c`: Clean up. Removes the `build` directory and returns you to
+   the TA root directory to grade the next student.
+   ```bash
+   c
+   ```
